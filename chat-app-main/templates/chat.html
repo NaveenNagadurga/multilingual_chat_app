@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Chat - {{ username }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body class="chat-page theme-default">
+    <div class="chat-container">
+        <header class="chat-header">
+            <div>
+                <h2>
+                    💬 Chat Room
+                    <span class="room-name">{{ room }}</span>
+                </h2>
+                <p>Welcome, <strong>{{ username }}</strong> — start chatting!</p>
+            </div>
+
+            <div class="chat-header-meta">
+                <div class="status-pill">
+                    <span class="status-dot"></span>
+                    <span>Online</span>
+                </div>
+
+                <!-- Theme selector -->
+                <select id="theme-select" class="theme-select">
+                    <option value="theme-default">Default</option>
+                    <option value="theme-galaxy">Galaxy</option>
+                    <option value="theme-neon">Neon</option>
+                    <option value="theme-gold">Gold</option>
+                    <option value="theme-cyberpunk">Cyberpunk</option>
+                </select>
+
+                <a href="{{ url_for('home') }}" class="back-link">← Back</a>
+            </div>
+        </header>
+
+        <main class="messages" id="messages"></main>
+
+        <!-- Typing indicator -->
+        <div id="typing-indicator" class="typing-indicator"></div>
+
+        <div class="input-area">
+            <!-- Emoji button + panel -->
+            <div class="emoji-wrapper">
+                <button type="button" id="emoji-button" class="emoji-button">😀</button>
+                <div id="emoji-panel" class="emoji-panel">
+                    <span>😀</span><span>😁</span><span>😂</span><span>😊</span>
+                    <span>😍</span><span>😘</span><span>😎</span><span>🤩</span>
+                    <span>👍</span><span>🙏</span><span>🔥</span><span>🎉</span>
+                    <span>❤️</span><span>✨</span><span>😢</span><span>🤔</span>
+                </div>
+            </div>
+
+            <input
+                type="text"
+                id="message-input"
+                placeholder="Type a message and press Enter..."
+                autocomplete="off"
+            >
+            <button type="button" id="send-btn" onclick="sendMessage()">Send 📤</button>
+        </div>
+    </div>
+
+    <!-- Sounds (put send.mp3 & receive.mp3 in static folder) -->
+    <audio id="send-sound" src="{{ url_for('static', filename='send.mp3') }}"></audio>
+    <audio id="receive-sound" src="{{ url_for('static', filename='receive.mp3') }}"></audio>
+
+    <script>
+        const socket = io();
+        const username = "{{ username }}";
+
+        const messagesDiv = document.getElementById('messages');
+        const input = document.getElementById('message-input');
+        const typingIndicator = document.getElementById('typing-indicator');
+        const themeSelect = document.getElementById('theme-select');
+        const emojiButton = document.getElementById('emoji-button');
+        const emojiPanel = document.getElementById('emoji-panel');
+        const sendSound = document.getElementById('send-sound');
+        const receiveSound = document.getElementById('receive-sound');
+
+        let typingTimeout = null;
+
+        // THEME SWITCHER
+        themeSelect.addEventListener('change', () => {
+            const theme = themeSelect.value;
+            document.body.className = 'chat-page ' + theme;
+        });
+
+        // SOCKET EVENTS
+        socket.on('user_connected', (data) => {
+            addNotification(data.username + ' joined the chat');
+        });
+
+        socket.on('receive_message', (data) => {
+            const isOwn = data.username === username;
+            addMessage(data.username, data.message, data.time, isOwn);
+
+            if (!isOwn && receiveSound) {
+                receiveSound.currentTime = 0;
+                receiveSound.play().catch(() => {});
+            }
+        });
+
+        socket.on('user_disconnected', (data) => {
+            addNotification(data.username + ' left the chat');
+        });
+
+        socket.on('user_typing', (data) => {
+            showTyping(data.username + ' is typing...');
+        });
+
+        // SEND MESSAGE
+        function sendMessage() {
+            const message = input.value.trim();
+            if (!message) return;
+
+            const time = new Date().toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
+            socket.emit('send_message', { message, time });
+            input.value = '';
+
+            if (sendSound) {
+                sendSound.currentTime = 0;
+                sendSound.play().catch(() => {});
+            }
+        }
+
+        // ADD MESSAGE TO UI
+        function addMessage(user, message, time, isOwn) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message ' + (isOwn ? 'own' : 'other');
+            const safeTime = time || '';
+            msgDiv.innerHTML = `
+                <div class="message-username">${user}</div>
+                <div class="message-text">${message}</div>
+                <div class="message-meta">${safeTime}</div>
+            `;
+            messagesDiv.appendChild(msgDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        // NOTIFICATIONS
+        function addNotification(text) {
+            const notifDiv = document.createElement('div');
+            notifDiv.className = 'notification';
+            notifDiv.textContent = text;
+            messagesDiv.appendChild(notifDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        // TYPING INDICATOR
+        function showTyping(text) {
+            typingIndicator.textContent = text;
+            typingIndicator.style.opacity = '1';
+
+            if (typingTimeout) clearTimeout(typingTimeout);
+            typingTimeout = setTimeout(() => {
+                typingIndicator.style.opacity = '0';
+            }, 1000);
+        }
+
+        input.addEventListener('input', () => {
+            socket.emit('typing');
+        });
+
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // EMOJI PICKER
+        emojiButton.addEventListener('click', () => {
+            emojiPanel.classList.toggle('open');
+        });
+
+        emojiPanel.querySelectorAll('span').forEach(emojiSpan => {
+            emojiSpan.addEventListener('click', () => {
+                input.value += emojiSpan.textContent;
+                input.focus();
+            });
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!emojiPanel.contains(e.target) && e.target !== emojiButton) {
+                emojiPanel.classList.remove('open');
+            }
+        });
+    </script>
+</body>
+</html>
